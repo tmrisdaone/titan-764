@@ -1,38 +1,34 @@
-# TITAN-7 ARM64: Hardware Blueprint
+# Titan-7 Hardware Blueprint
 
-## 📏 Physical Specifications
-- **Height:** ~38 cm (15 inches)
-- **Weight:** ~1.2 kg (2.6 lbs) - *Must stay under 1.5kg for MG996R torque limits*
-- **Degrees of Freedom (DOF):** 12 (6 per leg: Hip Yaw, Hip Roll, Hip Pitch, Knee Pitch, Ankle Pitch, Ankle Roll)
-- **Battery Life:** ~45 mins continuous walking
+## ⚠️ MANDATORY REQUIREMENT: SHIZUKU
+**Shizuku is NOT optional.** Android aggressively kills background processes and throttles sensor polling to save battery. To achieve the 50Hz+ polling rate required for bipedal balance without the phone putting Termux to sleep, you **must** use Shizuku to grant Termux elevated, battery-optimized permissions. 
 
-## 💰 Bill of Materials (BOM) & Pricing
+1. Install [Shizuku](https://shizuku.rikka.app/) from the Play Store or GitHub.
+2. Start Shizuku via Wireless Debugging (Android 11+) or Root.
+3. Grant Termux elevated permissions via Shizuku to prevent wakelock penalties and background throttling during sensor polling.
 
-| Component | Spec | Qty | Est. Price (USD) | Total |
-|-----------|------|-----|------------------|-------|
-| **Brain** | Your existing Android Phone (ARM64) | 1 | $0 (Owned) | $0 |
-| **MCU** | ESP32-WROOM-32 (WiFi + BT) | 1 | $6.00 | $6.00 |
-| **Servos** | MG996R Metal Gear (13kg/cm torque) | 12 | $5.50 | $66.00 |
-| **Power** | 3S LiPo Battery (11.1V, 2200mAh) | 1 | $15.00 | $15.00 |
-| **Regulator**| UBEC 5V 3A (Steps 11.1V down to 5V for ESP32/Servos) | 1 | $4.00 | $4.00 |
-| **Frame** | 3mm Aluminum U-Channel + 3D Printed PLA joints | 1 | $15.00 | $15.00 |
-| **Cabling** | Silicone servo extension wires, XT60 connectors | 1 | $10.00 | $10.00 |
-| **Mount** | Universal phone clamp + Velcro | 1 | $5.00 | $5.00 |
-| **TOTAL** | | | | **~$121.00** |
+## 🛠️ Bill of Materials (BOM)
+**Total Estimated Cost:** ~$121 USD (assuming you already own the Android phone).
 
-## 🔌 Wiring Diagram (Conceptual)
-```
-[ 3S LiPo 11.1V ] 
-       │
-       ├──(Main Power)──→ [ UBEC 5V 3A ] ──→ [ ESP32 5V/VIN ]
-       │                                     └──→ [ Servo VCC (All 12 in parallel) ]
-       │
-       └──(Balance Lead)─→ [ Phone USB-C OTG ] (Charges phone slowly while running)
-```
-*⚠️ WARNING: Do NOT power 12 MG996R servos directly from the ESP32 3.3V pin. It will fry the board. Use the UBEC.*
+| Component | Qty | Estimated Price | Purpose |
+|-----------|-----|-----------------|---------|
+| ESP32 Dev Board (WROOM-32) | 1 | $6 | Low-latency motor controller & serial bridge |
+| MG996R Metal-Gear Servos | 12 | $60 ($5/ea) | Heavy-duty joint actuation (6 per leg) |
+| 3S LiPo Battery (11.1V, 2200mAh) | 1 | $20 | Main power for all 12 servos |
+| UBEC (5V 5A) | 1 | $8 | Steps 11.1V down to safe 5V for ESP32 & logic |
+| USB OTG Adapter | 1 | $3 | Connects phone to ESP32 via serial |
+| 3D Printed Chassis (or Aluminum) | 1 | $24 | Structural frame (filament cost / scrap metal) |
 
-## 📱 Termux Sensor Mapping
-With `termux-api` installed, the phone provides:
-- `termux-sensor -s "Accelerometer"` → Z-axis gravity for ankle pitch correction.
-- `termux-sensor -s "Gyroscope"` → Yaw/Pitch/Roll for dynamic balance (complementary filter).
-- `termux-sensor -s "Orientation"` → Absolute heading for navigation.
+## 🔌 Wiring Guide
+1. **Power**: LiPo (+) → UBEC (+IN), LiPo (-) → UBEC (-IN).
+2. **Servo Power**: All 12 servo VCC → UBEC (+OUT), all servo GND → UBEC (-OUT). *DO NOT power servos from the ESP32.*
+3. **Logic Power**: UBEC (+OUT) → ESP32 VIN, UBEC (-OUT) → ESP32 GND.
+4. **Signal**: ESP32 GPIO pins (e.g., 12-17 for Left Leg, 18-23 for Right Leg) → Servo PWM signal wires.
+5. **Comm**: ESP32 TX/RX → Phone via USB OTG (Serial).
+
+## 📐 Dimensions & Kinematics
+- **Leg Configuration**: 6-DOF per leg (Hip Yaw, Hip Roll, Hip Pitch, Knee Pitch, Ankle Pitch, Ankle Roll).
+- **Thigh Length**: ~150mm
+- **Shin Length**: ~150mm
+- **Total Height**: ~400mm (standing)
+- **Weight Target**: < 2.5kg (to stay within MG996R torque limits)
