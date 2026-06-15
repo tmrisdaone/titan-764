@@ -162,3 +162,62 @@ titan-7arm64/
 ---
 
 *Built for the dreamers shipping hardware from Termux.*
+
+---
+
+# Full Hardware Blueprint (docs/blueprint.md)
+
+## MANDATORY: Shizuku (Not Optional)
+Shizuku lives at https://shizuku.rikka.app. Android aggressively kills background processes and throttles sensor polling to save battery. To achieve 50Hz+ polling rate required for bipedal balance without the phone putting Termux to sleep, you **must** use Shizuku to grant Termux elevated, battery-optimized permissions.
+
+What Shizuku unlocks for TITAN-7:
+- **`termux-sensor` with background wakelock** — keeps the accelerometer/gyro polling alive when the screen sleeps. Without Shizuku, Doze kills your sensors in ~90 seconds and the robot falls over blind.
+- **USB OTG serial without `android.hardware.usb.host` whitelisting** — directly opens `/dev/ttyUSB*` from Python to talk to the ESP32.
+- **`su`-like access via `shizuku` CLI** for direct `/dev` GPU and DRM node access (see GPU section below).
+
+### Install Shizuku
+1. Install the Shizuku app from the Play Store (or F-Droid).
+2. Enable Shizuku via **Settings → Developer options → Wireless debugging** (or via ADB on first launch: `adb shell sh /sdcard/Android/data/moe.shizuku.rikka.api/start.sh`).
+3. Verify: `shizuku --status` should say `running`.
+4. Once Shizuku is up, Termux inherits the elevated permission space.
+
+---
+
+## Future: Termux + X11 + GPU via Shizuku
+Shizuku unlocks `/dev/dri/*` and `/dev/graphics/*` DRM nodes that are normally hidden from userland. This lets X11 render hardware-accelerated desktops directly on your phone’s GPU (Mali/Adreno) without needing root. **See `scripts/gpu_x11_shizuku.sh` for the one-click launcher.**
+
+Warnings:
+- Raw DRM access bypasses Android’s display compositor. Use at your own risk.
+- High GPU usage drains battery fast.
+- Only tested on Snapdragon/MediaTek Mali/Adreno devices.
+
+---
+
+## BOM (Bill of Materials)
+| Component | Qty | Est. Price | Purpose |
+|-----------|-----|-----------|---------|
+| ESP32 Dev Board (WROOM-32) | 1 | $6 | Low-latency motor controller & serial bridge |
+| MG996R Metal-Gear Servos | 12 | $60 ($5/ea) | Heavy-duty joint actuation (6 per leg) |
+| 3S LiPo Battery (11.1V, 2200mAh) | 1 | $20 | Main power for all 12 servos |
+| UBEC (5V 5A) | 1 | $8 | Steps 11.1V down to safe 5V for ESP32 & logic |
+| USB OTG Adapter | 1 | $3 | Connects phone to ESP32 via serial |
+| 3D Printed Chassis | 1 | $24 | Structural frame |
+| **Total** | | **~$121** | Assuming you already own a phone |
+
+---
+
+## Wiring Guide
+1. **Power**: LiPo (+) → UBEC (+IN), LiPo (-) → UBEC (-IN).
+2. **Servo Power**: All 12 servo VCC → UBEC (+OUT), all servo GND → UBEC (-OUT). *DO NOT power servos from the ESP32.*
+3. **Logic Power**: UBEC (+OUT) → ESP32 VIN, UBEC (-OUT) → ESP32 GND.
+4. **Signal**: ESP32 GPIO pins (e.g., 12-17 for Left Leg, 18-23 for Right Leg) → Servo PWM signal wires.
+5. **Comm**: ESP32 TX/RX → Phone via USB OTG (Serial).
+
+---
+
+## Kinematics / Dimensions
+- **Leg Configuration**: 6-DOF per leg (Hip Yaw, Hip Roll, Hip Pitch, Knee Pitch, Ankle Pitch, Ankle Roll).
+- **Thigh Length**: ~150mm
+- **Shin Length**: ~150mm
+- **Total Height**: ~400mm (standing)
+- **Weight Target**: < 2.5kg (to stay within MG996R torque limits)
