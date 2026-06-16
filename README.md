@@ -1,223 +1,153 @@
 # TITAN-7 ARM64
 
-Phone-brain bipedal robot running on Termux + Shizuku + Ollama 0.5B + ESP32.
+[![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
+[![ESP32](https://img.shields.io/badge/ESP32-MicroPython-green.svg)](https://docs.micropython.org/)
+[![Termux](https://img.shields.io/badge/Termux-arm64-cyan.svg)](https://termux.com/)
+[![Shizuku](https://img.shields.io/badge/Shizuku-ADB_Elevation-FF6B35.svg)](https://shizuku.rikka.app)
+[![Servos](https://img.shields.io/badge/MG996R-12x-critical.svg)](https://en.wikipedia.org/wiki/Servo_(radio_control))
 
----
+Phone-brain bipedal robot. Runs on arm64 Android through Termux + Shizuku. The phone reads IMU sensors, runs a 0.5B LLM for gait decisions, and sends serial commands to an ESP32 that drives 12 MG996R servos via PCA9685.
 
 ## Architecture
 
+![TITAN-7 ARM64 Hardware Diagram](assets/titan764-hardware.png)
+
 ```
-[Android Phone]  ←brain/main.py (Termux + termux-sensor)
-      │  USB OTG
+[Android Phone]
+  Termux + Shizuku
+  termux-sensor (IMU) + Ollama(Qwen2.5:0.5B)
+  USB OTG
       ▼
-[ESP32]  ←esp32_main.py (MicroPython, 50Hz servo PWM)
-      │  GPIO/PWM
-      ▼
-[12× MG996R servos]  →  Bipedal legs, arms
+[ESP32]
+  esp32_main.py (MicroPython)
+  PCA9685 (12× MG996R)
 ```
 
-The phone runs everything high-level: sensor fusion, LLM intent (Qwen2.5:0.5B via Ollama), UDP commands to the ESP32. The ESP32 does the real-time low-level control so the robot doesn't eat dust if the LLM takes 100ms.
+**Phone responsibilities:**
+- Sensor fusion from accelerometer + gyroscope
+- LLM intent decisions (~80–150ms, 1–2s interval)
+- Serial command transport to ESP32
 
----
+**ESP32 responsibilities:**
+- 50Hz PID gait control
+- Safe servo command execution
+- Real-time balance and walking primitives
 
-## Hardware BOM (Full Build)
+## Hardware Bill of Materials
 
-| Component | Qty | Est. Price | Notes |
-|-----------|-----|-----------|-------|
-| ESP32 DEVKIT V1 | 1 | $6 | Main MCU |
-| MG996R metal-gear servo | 12 | $3.50 ea | 6 per leg (hip/thigh/knee/ankle), 6 for arms/torso |
-| 3S LiPo 11.1V 2200mAh | 1 | $12 | Robot power |
-| UBEC 5V 5A step-down | 1 | $4 | Powers the ESP32 + servos cleanly |
-| PCA9685 16ch servo driver | 1 | $4 | Lets ESP32 control 12 servos over I2C instead of burning every GPIO |
-| MPU6050 IMU | 1 | $2 | Backup per-robot IMU on the robot body itself |
-| USB OTG cable | 1 | $2 | Phone to ESP32 serial link |
-| 3D-printed chassis | 1 | $10–20 | Your own PETG/PLA print or sponsor print |
-| Jumper wires + breadboard | assorted | $5 | Wiring glue |
-| **Total** | | **~$112–122** | Assuming you already own a phone |
+| Component | Qty | Notes |
+|-----------|-----|-------|
+| ESP32 DEVKIT V1 | 1 | Main MCU |
+| MG996R metal-gear servo | 12 | 6 per leg |
+| PCA9685 16ch servo driver | 1 | I2C → 0x40 |
+| 3S LiPo 11.1V 2200mAh | 1 | Robot power |
+| UBEC 5V 20A step-down | 1 | Peak ~15A stall |
+| MPU6050 IMU | 1 | Optional backup IMU on body |
+| USB OTG cable | 1 | Phone → ESP32 serial |
+| 3D-printed chassis | 1 | PETG/PLA |
 
-### Dimensions (rough, 170cm tall bot prototype)
+**Estimated build cost:** ~$118–130
 
-- **Footprint:** 25cm(width) × 35cm(length)
-- **Hip height:** ~90cm from ground
-- **Thigh:** 18cm
-- **Shin:** 16cm
-- **Total leg travel:** ~34cm (fully extended)
-- **Torso mass:** ~600g (ESP32 + battery + driver boards)
-- **Servo torque each:** ~11kg/cm @ 6V → 12 servos gives chain-torque reserve
+## Wiring
 
----
+```
+Phone (USB OTG) → ESP32 UART0 @ 115200 baud [Serial]
 
-## Shizuku (MANDATORY — Not Optional)
+ESP32 I2C → PCA9685 @ 0x40
+  PCA9685 channels 0-5 → right leg
+  PCA9685 channels 6-11 → left leg
+  PCA9685 channels 12-13 → pelvis
+  PCA9685 channels 14-15 → torso
+  PCA9685 V+ → UBEC 5V output
+  PCA9685 GND → ESP32 GND + UBEC GND
 
-**Shizuku is NOT optional on this build.** Shizuku lives at https://shizuku.rikka.app and is the only stable way to give Termux the elevated permissions this firmware needs on Android 10+.
-
-What Shizuku unlocks for TITAN-7:
-
-- **`termux-sensor` with background wakelock** — keeps the accelerometer/gyro polling alive when the screen sleeps. Without Shizuku, Doze kills your sensors in ~90 seconds and the robot falls over blind.
-- **USB OTG serial without `android.hardware.usb.host` whitelisting** — directly opens `/dev/ttyUSB*` from Python to talk to the ESP32.
-- **`su`-like access via `shizuku` CLI** for direct `/dev` GPU and DRM node access (see GPU section below).
-
-### Install Shizuku
-
-1. Install the Shizuku app from the Play Store (or F-Droid).
-2. Enable Shizuku via **Settings → Developer options → Wireless debugging** (or via ADB on first launch: `adb shell sh /sdcard/Android/data/moe.shizuku.rikka.api/start.sh`).
-3. Verify: `shizuku --status` should say `running`.
-4. Once Shizuku is up, Termux inherits the elevated permission space.
-
----
-
-## Termux Sensor Bridge
-
-Your phone already has:
-- **Accelerometer** (`加速度传感器`)
-- **Gyroscope** (`陀螺仪`)
-- **Gravity sensor**
-- **Rotation vector**
-
-`termux-sensor` exposes all four. `brain/main.py` polls them at 10Hz over HTTP and builds a quaternion for the robot’s torso orientation. The MPU6050 on the robot itself is just a redundant local backup; the phone is the authoritative IMU because it’s higher quality and already fused.
-
-Polling format:
-
-```json
-{"accel": {"x":0.12,"y":-9.81,"z":0.04},"gyro":{"x":0.01,"y":0.02,"z":-0.01}}
+MPU6050 I2C → ESP32 (optional)
+  VCC → 3.3V
+  GND → GND
+  SDA → GPIO21
+  SCL → GPIO22
 ```
 
----
+## Servo Map
 
-## 0.5B LLM Stack (Ollama)
-
-Yes, you can absolutely run a 0.5B model on the same phone. The model is high-level intent only — it does NOT do per-frame control.
-
-- Pull: `ollama pull qwen2.5:0.5b`
-- `brain/main.py` sends a prompt every 200ms: `"orientation: pitch=2.1 roll=0.3 left_hip_load=0.8. Decide: step_forward | adjust_balance | stop"`
-- The model returns one of three actions. Python interprets it into motor targets.
-- Latency budget: model inference takes ~80–150ms on mid-range Snapdragon; Python PID runs at 50Hz on the ESP32 so it isn't blocked.
-
-Good news: Ollama on Android automatically offloads tensor work to the **NNAPI / GPU / NPU** if Shizuku gives it access. More on that in GPU section below.
-
----
+| Channel | Joint | Leg/Side |
+|---------|-------|----------|
+| 0 | Hip Yaw | Right |
+| 1 | Hip Roll | Right |
+| 2 | Hip Pitch | Right |
+| 3 | Knee Pitch | Right |
+| 4 | Ankle Pitch | Right |
+| 5 | Ankle Roll | Right |
+| 6 | Hip Yaw | Left |
+| 7 | Hip Roll | Left |
+| 8 | Hip Pitch | Left |
+| 9 | Knee Pitch | Left |
+| 10 | Ankle Pitch | Left |
+| 11 | Ankle Roll | Left |
+| 12 | Pelvis Yaw | Pelvis |
+| 13 | Pelvis Roll | Pelvis |
+| 14 | Neck Pitch | Torso |
+| 15 | Waist Yaw | Torso |
 
 ## Quick Start
 
 ```bash
-# 1. Clone
 git clone https://github.com/tmrisdaone/titan-7arm64.git
 cd titan-7arm64
-
-# 2. Provision Termux
 chmod +x setup.sh
 ./setup.sh
+```
 
-# 3. Install Shizuku from Play Store / F-Droid and start it
-#    (required — script will not fully work without it)
+### Prerequisites
+- Termux from F-Droid
+- Shizuku installed and running
+- USB OTG cable
+- ESP32 flashed with `microcontroller/esp32_main.py`
 
-# 4. Flash ESP32
-#    Use ampy / mpremote to push microcontroller/esp32_main.py to /flash/main.py
+### Flash ESP32
+```bash
+mpremote connect /dev/ttyUSB* mount microcontroller/esp32_main.py:/main.py
+```
 
-# 5. Run the brain
+### Run the brain
+```bash
 python3 brain/main.py
 ```
 
----
+## Safety Warning
 
-## Wiring Diagram
+⚠️ **This robot uses 12 high-torque servos powered by an 11.1V LiPo battery.**
+- Always power off before adjusting servos
+- Use the UBEC; do not power servos from ESP32 5V pin
+- Secure the robot before first power-on
+- Keep a kill switch / battery disconnect accessible
 
-```
-Phone (USB OTG) → ESP32 UART2 (GPIO16=RX, GPIO17=TX) @ 115200 baud
-
-ESP32 I2C → PCA9685 @ 0x40
-  PCA9685 channels 0-11 → MG996R signal wires
-  PCA9686 V+ → UBEC 5V output
-  PCA9686 GND → ESP32 GND + UBEC GND
-
-MPU6050 I2C → ESP32 (optional, local backup IMU)
-  VCC → 3.3V, GND → GND, SDA → GPIO21, SCL → GPIO22
-```
-
----
-
-## Repo Layout
+## Project Structure
 
 ```
 titan-7arm64/
-├── README.md          ← you are here
-├── setup.sh           ← Termux one-click bootstrap
+├── README.md
+├── setup.sh
 ├── brain/
-│   └── main.py        ← orchestrator (sensors → LLM → ESP32 UDP)
+│   └── main.py
 ├── microcontroller/
-│   └── esp32_main.py  ← MicroPython: PID gait, serial listener
+│   └── esp32_main.py
 └── docs/
-    └── gpu-shizuku.md ← direct GPU access guide + script
+    ├── blueprint.md
+    └── hardware_assembly.md
 ```
 
----
+## Contributing
 
-## Ongoing TODO
+1. Fork the repository
+2. Create a feature branch from `main`
+3. Run tests before submitting
+4. Open a pull request with a clear description
 
-- [ ] Walk cycle gait generator with online foot-placement planner
-- [ ] Vision module (camera + YOLOv8-nano) on the phone for obstacle avoidance
-- [ ] Voice module (Whisper.cpp tiny + Piper TTS) for "hey titan" wake word
-- [ ] Web dashboard over WebSocket from phone:8000
+## License
 
----
-
-*Built for the dreamers shipping hardware from Termux.*
+MIT
 
 ---
 
-# Full Hardware Blueprint (docs/blueprint.md)
-
-## MANDATORY: Shizuku (Not Optional)
-Shizuku lives at https://shizuku.rikka.app. Android aggressively kills background processes and throttles sensor polling to save battery. To achieve 50Hz+ polling rate required for bipedal balance without the phone putting Termux to sleep, you **must** use Shizuku to grant Termux elevated, battery-optimized permissions.
-
-What Shizuku unlocks for TITAN-7:
-- **`termux-sensor` with background wakelock** — keeps the accelerometer/gyro polling alive when the screen sleeps. Without Shizuku, Doze kills your sensors in ~90 seconds and the robot falls over blind.
-- **USB OTG serial without `android.hardware.usb.host` whitelisting** — directly opens `/dev/ttyUSB*` from Python to talk to the ESP32.
-- **`su`-like access via `shizuku` CLI** for direct `/dev` GPU and DRM node access (see GPU section below).
-
-### Install Shizuku
-1. Install the Shizuku app from the Play Store (or F-Droid).
-2. Enable Shizuku via **Settings → Developer options → Wireless debugging** (or via ADB on first launch: `adb shell sh /sdcard/Android/data/moe.shizuku.rikka.api/start.sh`).
-3. Verify: `shizuku --status` should say `running`.
-4. Once Shizuku is up, Termux inherits the elevated permission space.
-
----
-
-## Future: Termux + X11 + GPU via Shizuku
-Shizuku unlocks `/dev/dri/*` and `/dev/graphics/*` DRM nodes that are normally hidden from userland. This lets X11 render hardware-accelerated desktops directly on your phone’s GPU (Mali/Adreno) without needing root. **See `scripts/gpu_x11_shizuku.sh` for the one-click launcher.**
-
-Warnings:
-- Raw DRM access bypasses Android’s display compositor. Use at your own risk.
-- High GPU usage drains battery fast.
-- Only tested on Snapdragon/MediaTek Mali/Adreno devices.
-
----
-
-## BOM (Bill of Materials)
-| Component | Qty | Est. Price | Purpose |
-|-----------|-----|-----------|---------|
-| ESP32 Dev Board (WROOM-32) | 1 | $6 | Low-latency motor controller & serial bridge |
-| MG996R Metal-Gear Servos | 12 | $60 ($5/ea) | Heavy-duty joint actuation (6 per leg) |
-| 3S LiPo Battery (11.1V, 2200mAh) | 1 | $20 | Main power for all 12 servos |
-| UBEC (5V 5A) | 1 | $8 | Steps 11.1V down to safe 5V for ESP32 & logic |
-| USB OTG Adapter | 1 | $3 | Connects phone to ESP32 via serial |
-| 3D Printed Chassis | 1 | $24 | Structural frame |
-| **Total** | | **~$121** | Assuming you already own a phone |
-
----
-
-## Wiring Guide
-1. **Power**: LiPo (+) → UBEC (+IN), LiPo (-) → UBEC (-IN).
-2. **Servo Power**: All 12 servo VCC → UBEC (+OUT), all servo GND → UBEC (-OUT). *DO NOT power servos from the ESP32.*
-3. **Logic Power**: UBEC (+OUT) → ESP32 VIN, UBEC (-OUT) → ESP32 GND.
-4. **Signal**: ESP32 GPIO pins (e.g., 12-17 for Left Leg, 18-23 for Right Leg) → Servo PWM signal wires.
-5. **Comm**: ESP32 TX/RX → Phone via USB OTG (Serial).
-
----
-
-## Kinematics / Dimensions
-- **Leg Configuration**: 6-DOF per leg (Hip Yaw, Hip Roll, Hip Pitch, Knee Pitch, Ankle Pitch, Ankle Roll).
-- **Thigh Length**: ~150mm
-- **Shin Length**: ~150mm
-- **Total Height**: ~400mm (standing)
-- **Weight Target**: < 2.5kg (to stay within MG996R torque limits)
+Built to ship from Termux.

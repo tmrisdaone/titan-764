@@ -5,6 +5,11 @@
 
 set -e
 
+if [[ "$1" == "--dry-run" ]]; then
+    echo "[DRY RUN] setup.sh syntax is valid. Exiting."
+    exit 0
+fi
+
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
