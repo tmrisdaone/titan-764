@@ -10,15 +10,17 @@ Phone-brain bipedal robot. Runs on arm64 Android through Termux + Shizuku. The p
 
 ## Architecture
 
+![TITAN-7 ARM64 Hardware Diagram](assets/titan764-hardware.png)
+
 ```
 [Android Phone]
   Termux + Shizuku
-  termux-sensor (IMU) + Ollama (Qwen2.5:0.5B)
+  termux-sensor (IMU) + Ollama(Qwen2.5:0.5B)
   USB OTG
       ▼
 [ESP32]
   esp32_main.py (MicroPython)
-  PCA9685 → 12× MG996R servos
+  PCA9685 (12× MG996R)
 ```
 
 **Phone responsibilities:**
