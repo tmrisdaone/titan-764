@@ -7,6 +7,7 @@ coordinated bipedal commands to ESP32 (dual-leg + pelvis + torso).
 
 import subprocess
 import json
+import re
 import requests
 import serial
 import time
@@ -26,26 +27,40 @@ queue_lock = threading.Lock()
 # ─── TERMUX SENSOR POLLING ─────────────────────────────────────
 class TermuxSensor:
     @staticmethod
-    def get_imu():
-        try:
-            cmd = ['termux-sensor', '-s', 'Gyroscope,Accelerometer', '-n', '1', '-d', '100']
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=1)
-            data = json.loads(result.stdout)
-            
-            gyro = data['sensors'].get('Gyroscope', {}).get('values', [0,0,0])
-            accel = data['sensors'].get('Accelerometer', {}).get('values', [0,0,0])
-            
-            return {
-                "pitch_rate": gyro[0],   # rad/s
-                "roll_rate": gyro[1],
-                "yaw_rate": gyro[2],
-                "x_accel": accel[0],     # m/s^2
-                "y_accel": accel[1],
-                "z_accel": accel[2],
-                "timestamp": time.time()
-            }
-        except Exception as e:
-            return {"error": str(e)}
+    def get_imu(retries: int = 2):
+        """Read IMU from termux-sensor. Retries on transient failures.
+
+        Doze or sensor-permission denials can cause the first call to
+        fail; a 2nd or 3rd call usually succeeds once Shizuku has
+        acquired the sensor wakelock.
+        """
+        last_err = None
+        for attempt in range(retries + 1):
+            try:
+                cmd = ['termux-sensor', '-s', 'Gyroscope,Accelerometer', '-n', '1', '-d', '100']
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=2)
+                if result.returncode != 0:
+                    last_err = f"rc={result.returncode}: {result.stderr.strip()[:120]}"
+                    time.sleep(0.1)
+                    continue
+                data = json.loads(result.stdout)
+
+                gyro = data['sensors'].get('Gyroscope', {}).get('values', [0, 0, 0])
+                accel = data['sensors'].get('Accelerometer', {}).get('values', [0, 0, 0])
+
+                return {
+                    "pitch_rate": gyro[0],   # rad/s
+                    "roll_rate": gyro[1],
+                    "yaw_rate": gyro[2],
+                    "x_accel": accel[0],     # m/s^2
+                    "y_accel": accel[1],
+                    "z_accel": accel[2],
+                    "timestamp": time.time()
+                }
+            except (subprocess.TimeoutExpired, json.JSONDecodeError, KeyError) as e:
+                last_err = str(e)
+                time.sleep(0.1)
+        return {"error": last_err or "sensor unavailable"}
 
 # ─── LLM CORTEX ────────────────────────────────────────────────
 class LLMCortex:
@@ -88,7 +103,6 @@ Output ONE JSON:
             }, timeout=5)
             
             res_json = response.json()
-            import re
             match = re.search(r'\{.*\}', res_json.get('response', '{}'), re.DOTALL)
             if match:
                 return json.loads(match.group())

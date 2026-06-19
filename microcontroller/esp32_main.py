@@ -62,6 +62,14 @@ PCA9685_ADDR = 0x40
 PCA9685_FREQ = 50  # 50Hz for analog servos
 BAUD_RATE = 115200
 
+# I2C pin map — override these at boot via config.py or directly here
+# for boards other than the ESP32 DEVKIT V1.
+#   ESP32 DEVKIT V1 (default): SDA=21, SCL=22
+#   ESP32-S3 DevKitC:          SDA=8,  SCL=9
+#   ESP32-C3 DevKitM:          SDA=6,  SCL=7
+I2C_SDA_PIN = 21
+I2C_SCL_PIN = 22
+
 # PWM LIMITS (16-bit duty cycle 0-65535)
 # 1ms pulse = ~3277, 2ms pulse = ~6554, 1.5ms center = ~4915
 SERVO_MIN = 2400   # ~0.73ms  (-90 deg hard limit)
@@ -338,7 +346,7 @@ def main():
     print("═══════════════════════════════════════")
     
     # Init I2C + PCA9685
-    i2c = machine.I2C(0, scl=machine.Pin(22), sda=machine.Pin(21), freq=400000)
+    i2c = machine.I2C(0, scl=machine.Pin(I2C_SCL_PIN), sda=machine.Pin(I2C_SDA_PIN), freq=400000)
     devices = i2c.scan()
     if PCA9685_ADDR not in devices:
         print(f"❌ PCA9685 not found at 0x{PCA9685_ADDR:02X}. Found: {[hex(d) for d in devices]}")

@@ -29,8 +29,17 @@ echo ""
 # ─── 1. Update and install core dependencies ───────────────────
 info "[1/6] Updating packages and installing core deps..."
 pkg update -y -o Dpkg::Options::=--force-confdef >/dev/null
+# brain/main.py uses PEP 604 syntax (int | None) which requires Python 3.10+.
+# pkg's "python" alias may resolve to 3.11+ on F-Droid Termux but force it explicit.
 pkg install -y python termux-api openssl curl jq >/dev/null
-ok "Core packages installed"
+# Verify the version actually installed
+PY_VER="$(python3 -c 'import sys;print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+if [ "$(printf '%s\n' "3.10" "$PY_VER" | sort -V | head -1)" != "3.10" ]; then
+    bad "Need Python ≥ 3.10 for brain/main.py, found $PY_VER"
+    bad "Install with: pkg install python (F-Droid Termux) or pyenv"
+    exit 1
+fi
+ok "Core packages installed (Python $PY_VER)"
 
 # ─── 2. Grant Termux API permissions ──────────────────────────
 info "[2/6] Setting up Termux storage & API permissions..."

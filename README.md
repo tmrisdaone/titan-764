@@ -100,8 +100,8 @@ MPU6050 I2C → ESP32 (optional)
 ## Quick Start
 
 ```bash
-git clone https://github.com/tmrisdaone/titan-7arm64.git
-cd titan-7arm64
+git clone https://github.com/tmrisdaone/titan-764.git
+cd titan-764
 chmod +x setup.sh
 ./setup.sh
 ```
