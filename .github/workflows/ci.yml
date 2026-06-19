@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  syntax:
+    name: Python syntax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: byte-compile brain
+        run: |
+          python -m py_compile brain/main.py && echo "brain/main.py OK"
+      - name: byte-compile firmware
+        run: |
+          # MicroPython: a subset of syntax. We just check the file is parseable
+          # by CPython's compile() — a real MicroPython target is tested on-device.
+          python -m py_compile microcontroller/esp32_main.py && echo "esp32_main.py OK"
+
+  shellcheck:
+    name: Shell scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: shellcheck setup.sh
+        run: |
+          if command -v shellcheck >/dev/null; then
+            shellcheck setup.sh
+          else
+            sudo apt-get update && sudo apt-get install -y shellcheck && shellcheck setup.sh
+          fi
